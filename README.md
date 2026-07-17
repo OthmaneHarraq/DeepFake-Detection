@@ -73,7 +73,7 @@ Download the checkpoint from the official RhythmFormer repository and place it a
 checkpoints/UBFC_cross.pth
 ```
 
-RhythmFormer repo: [https://github.com/zizheng-guo/rhythmformer]
+RhythmFormer repo: https://github.com/zizheng-guo/rhythmformer
 
 > **Note:** The RhythmFormer checkpoint belongs to the original authors and cannot be redistributed here.
 
