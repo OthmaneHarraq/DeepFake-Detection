@@ -34,10 +34,7 @@ PANELS = [
     ),
 ]
 
-fig, axes = plt.subplots(3, 1, figsize=(5, 4), sharex=True,
-                         facecolor="white",
-                         gridspec_kw={"hspace": 0.08})
-
+fig, axes = plt.subplots(3, 1, figsize=(5, 4), sharex=True, facecolor="white", gridspec_kw={"hspace": 0.08})
 frames = np.arange(160)
 
 for i, (path, ylabel, color, auc_text) in enumerate(PANELS):
@@ -60,14 +57,12 @@ for i, (path, ylabel, color, auc_text) in enumerate(PANELS):
     ax.spines["right"].set_visible(False)
 
     # AUC annotation top-right
-    ax.text(0.98, 0.90, auc_text, transform=ax.transAxes,
-            fontsize=8, color="gray", ha="right", va="top")
+    ax.text(0.98, 0.90, auc_text, transform=ax.transAxes, fontsize=8, color="gray", ha="right", va="top")
 
 axes[-1].set_xlabel("Frame index", fontsize=10)
 axes[-1].set_xlim(0, 159)
 
 plt.tight_layout()
 fig.savefig(BASE / "waveform_comparison.pdf", format="pdf", bbox_inches="tight")
-fig.savefig(BASE / "waveform_comparison.png", dpi=300, bbox_inches="tight",
-            facecolor="white")
+fig.savefig(BASE / "waveform_comparison.png", dpi=300, bbox_inches="tight", facecolor="white")
 print("Saved")
