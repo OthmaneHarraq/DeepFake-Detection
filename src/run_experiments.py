@@ -32,26 +32,18 @@ from sklearn.metrics import roc_auc_score, classification_report, roc_curve
 from sklearn.model_selection import StratifiedGroupKFold
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-SEED   = 42
+SEED = 42
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Args
-# ─────────────────────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Phase 4 experiments")
-    p.add_argument("--data-root",   default=str(Path.home() / "data"))
-    p.add_argument("--experiment",  default="all",
-                   choices=["technique", "hp", "test", "diagnostics",
-                             "eval18", "permethod", "all"])
-    p.add_argument("--epochs",      type=int, default=30)
-    p.add_argument("--batch",       type=int, default=64)
-    p.add_argument("--n-folds",     type=int, default=5)
+    p.add_argument("--data-root", default=str(Path.home() / "data"))
+    p.add_argument("--experiment", default="all", choices=["technique", "hp", "test", "diagnostics", "eval18", "permethod", "all"])
+    p.add_argument("--epochs", type=int, default=30)
+    p.add_argument("--batch", type=int, default=64)
+    p.add_argument("--n-folds", type=int, default=5)
     return p.parse_args()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Model architectures
-# ─────────────────────────────────────────────────────────────────────────────
 class Waveform1DCNN(nn.Module):
     def __init__(self, dropout=0.3, channels=(32, 64, 128)):
         super().__init__()
@@ -60,8 +52,8 @@ class Waveform1DCNN(nn.Module):
         self.conv2 = nn.Conv1d(c1, c2, 7, padding=3); self.bn2 = nn.BatchNorm1d(c2)
         self.conv3 = nn.Conv1d(c2, c3, 5, padding=2); self.bn3 = nn.BatchNorm1d(c3)
         self.pool1 = nn.MaxPool1d(2); self.pool2 = nn.MaxPool1d(2)
-        self.gap  = nn.AdaptiveAvgPool1d(1); self.drop = nn.Dropout(dropout)
-        self.fc   = nn.Linear(c3, 1)
+        self.gap = nn.AdaptiveAvgPool1d(1); self.drop = nn.Dropout(dropout)
+        self.fc = nn.Linear(c3, 1)
     def forward(self, x):
         if x.dim() == 2: x = x.unsqueeze(1)
         x = self.pool1(F.relu(self.bn1(self.conv1(x))))
@@ -74,13 +66,11 @@ class BasicBlock1D(nn.Module):
     def __init__(self, in_ch, out_ch, stride=1, dropout=0.0):
         super().__init__()
         self.conv1 = nn.Conv1d(in_ch, out_ch, 3, stride=stride, padding=1, bias=False)
-        self.bn1   = nn.BatchNorm1d(out_ch)
+        self.bn1 = nn.BatchNorm1d(out_ch)
         self.conv2 = nn.Conv1d(out_ch, out_ch, 3, padding=1, bias=False)
-        self.bn2   = nn.BatchNorm1d(out_ch)
-        self.drop  = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.shortcut = (
-            nn.Sequential(nn.Conv1d(in_ch, out_ch, 1, stride=stride, bias=False),
-                          nn.BatchNorm1d(out_ch))
+        self.bn2 = nn.BatchNorm1d(out_ch)
+        self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.shortcut = (nn.Sequential(nn.Conv1d(in_ch, out_ch, 1, stride=stride, bias=False), nn.BatchNorm1d(out_ch))
             if stride != 1 or in_ch != out_ch else nn.Identity()
         )
     def forward(self, x):
@@ -92,39 +82,33 @@ class Waveform1DResNet(nn.Module):
     def __init__(self, dropout=0.3, channels=(32, 64, 128)):
         super().__init__()
         c1, c2, c3 = channels
-        self.stem   = nn.Sequential(
+        self.stem = nn.Sequential(
             nn.Conv1d(1, c1, 7, padding=3, bias=False),
             nn.BatchNorm1d(c1), nn.ReLU(inplace=True), nn.MaxPool1d(2))
-        self.stage1 = nn.Sequential(BasicBlock1D(c1, c1, dropout=dropout),
-                                    BasicBlock1D(c1, c1, dropout=dropout))
-        self.stage2 = nn.Sequential(BasicBlock1D(c1, c2, stride=2, dropout=dropout),
-                                    BasicBlock1D(c2, c2, dropout=dropout))
-        self.stage3 = nn.Sequential(BasicBlock1D(c2, c3, stride=2, dropout=dropout),
-                                    BasicBlock1D(c3, c3, dropout=dropout))
+        self.stage1 = nn.Sequential(BasicBlock1D(c1, c1, dropout=dropout), BasicBlock1D(c1, c1, dropout=dropout))
+        self.stage2 = nn.Sequential(BasicBlock1D(c1, c2, stride=2, dropout=dropout), BasicBlock1D(c2, c2, dropout=dropout))
+        self.stage3 = nn.Sequential(BasicBlock1D(c2, c3, stride=2, dropout=dropout), BasicBlock1D(c3, c3, dropout=dropout))
         self.gap = nn.AdaptiveAvgPool1d(1)
-        self.fc  = nn.Linear(c3, 1)
+        self.fc = nn.Linear(c3, 1)
     def forward(self, x):
         if x.dim() == 2: x = x.unsqueeze(1)
         return self.fc(self.gap(self.stage3(self.stage2(self.stage1(self.stem(x))))).squeeze(-1)).squeeze(-1)
 
 
 class WaveformTransformer(nn.Module):
-    def __init__(self, patch_size=8, d_model=64, nhead=4, num_layers=2,
-                 mlp_dim=128, dropout=0.3):
+    def __init__(self, patch_size=8, d_model=64, nhead=4, num_layers=2, mlp_dim=128, dropout=0.3):
         super().__init__()
         assert 160 % patch_size == 0
         self.patch_embed = nn.Conv1d(1, d_model, kernel_size=patch_size, stride=patch_size)
-        self.cls_token   = nn.Parameter(torch.zeros(1, 1, d_model))
-        self.pos_embed   = nn.Parameter(torch.zeros(1, 160 // patch_size + 1, d_model))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        self.pos_embed = nn.Parameter(torch.zeros(1, 160 // patch_size + 1, d_model))
         nn.init.trunc_normal_(self.cls_token, std=0.02)
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
-        enc_layer    = nn.TransformerEncoderLayer(d_model, nhead, mlp_dim, dropout,
-                                                  activation="gelu", batch_first=True,
-                                                  norm_first=True)
+        enc_layer = nn.TransformerEncoderLayer(d_model, nhead, mlp_dim, dropout, activation="gelu", batch_first=True, norm_first=True)
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers)
-        self.norm    = nn.LayerNorm(d_model)
+        self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
-        self.fc      = nn.Linear(d_model, 1)
+        self.fc = nn.Linear(d_model, 1)
     def forward(self, x):
         if x.dim() == 2: x = x.unsqueeze(1)
         x = self.patch_embed(x).transpose(1, 2)
@@ -133,22 +117,19 @@ class WaveformTransformer(nn.Module):
 
 
 class ToeplitzViT(nn.Module):
-    def __init__(self, image_size=160, patch_size=16, d_model=64, nhead=4,
-                 num_layers=2, mlp_dim=128, dropout=0.3):
+    def __init__(self, image_size=160, patch_size=16, d_model=64, nhead=4, num_layers=2, mlp_dim=128, dropout=0.3):
         super().__init__()
         n = (image_size // patch_size) ** 2
         self.patch_embed = nn.Conv2d(1, d_model, patch_size, stride=patch_size)
-        self.cls_token   = nn.Parameter(torch.zeros(1, 1, d_model))
-        self.pos_embed   = nn.Parameter(torch.zeros(1, n + 1, d_model))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        self.pos_embed = nn.Parameter(torch.zeros(1, n + 1, d_model))
         nn.init.trunc_normal_(self.cls_token, std=0.02)
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
-        enc_layer    = nn.TransformerEncoderLayer(d_model, nhead, mlp_dim, dropout,
-                                                  activation="gelu", batch_first=True,
-                                                  norm_first=True)
+        enc_layer = nn.TransformerEncoderLayer(d_model, nhead, mlp_dim, dropout, activation="gelu", batch_first=True, norm_first=True)
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers)
-        self.norm    = nn.LayerNorm(d_model)
+        self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
-        self.fc      = nn.Linear(d_model, 1)
+        self.fc = nn.Linear(d_model, 1)
     def forward(self, x):
         if x.dim() == 3: x = x.unsqueeze(1)
         x = self.patch_embed(x).flatten(2).transpose(1, 2)
@@ -157,37 +138,34 @@ class ToeplitzViT(nn.Module):
 
 
 ARCH_CLASSES = {
-    "1D CNN":       (Waveform1DCNN,       "X"),
-    "1D ResNet":    (Waveform1DResNet,    "X"),
-    "Transformer":  (WaveformTransformer, "X"),
-    "Toeplitz ViT": (ToeplitzViT,         "T"),
+    "1D CNN": (Waveform1DCNN, "X"),
+    "1D ResNet": (Waveform1DResNet, "X"),
+    "Transformer": (WaveformTransformer, "X"),
+    "Toeplitz ViT": (ToeplitzViT, "T"),
 }
 
 BEST_CONFIGS = {
-    "1D CNN":       {"lr": 5e-4, "wd": 1e-3,  "dropout": 0.3},
-    "1D ResNet":    {"lr": 1e-3, "wd": 5e-4,  "dropout": 0.5},
-    "Transformer":  {"lr": 1e-3, "wd": 1e-4,  "dropout": 0.3},
+    "1D CNN": {"lr": 5e-4, "wd": 1e-3,  "dropout": 0.3},
+    "1D ResNet": {"lr": 1e-3, "wd": 5e-4,  "dropout": 0.5},
+    "Transformer": {"lr": 1e-3, "wd": 1e-4,  "dropout": 0.3},
     "Toeplitz ViT": {"lr": 1e-3, "wd": 5e-4,  "dropout": 0.5},
 }
 
 HP_SWEEP = {
-    "lr":      [5e-4, 1e-3, 2e-3],
-    "wd":      [1e-4, 5e-4, 1e-3],
+    "lr": [5e-4, 1e-3, 2e-3],
+    "wd": [1e-4, 5e-4, 1e-3],
     "dropout": [0.1,  0.3,  0.5],
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Data loading helpers
-# ─────────────────────────────────────────────────────────────────────────────
 def zscore(x):
     return (x - x.mean()) / (x.std() + 1e-6)
 
 def augment_waveform(x, noise_std=0.05):
     x = x + np.random.normal(0, noise_std, x.shape).astype(np.float32)
     mask_len = np.random.randint(10, 25)
-    start    = np.random.randint(0, len(x) - mask_len)
-    x        = x.copy(); x[start:start + mask_len] = 0.0
+    start = np.random.randint(0, len(x) - mask_len)
+    x = x.copy(); x[start:start + mask_len] = 0.0
     return x
 
 def build_toeplitz(X):
@@ -207,13 +185,10 @@ def load_waveforms(wave_root, df, label_col="class"):
 def compute_eer(y_true, y_score):
     fpr, tpr, _ = roc_curve(y_true, y_score)
     fnr = 1 - tpr
-    i   = np.argmin(np.abs(fnr - fpr))
+    i = np.argmin(np.abs(fnr - fpr))
     return (fpr[i] + fnr[i]) / 2
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Training helpers
-# ─────────────────────────────────────────────────────────────────────────────
 def get_X(X_plain, X_zscore, T_plain, T_zscore, arch_name, use_zscore):
     _, inp = ARCH_CLASSES[arch_name]
     if inp == "X":
@@ -221,8 +196,7 @@ def get_X(X_plain, X_zscore, T_plain, T_zscore, arch_name, use_zscore):
     return T_zscore if use_zscore else T_plain
 
 
-def run_cv(model_class, dropout, X_data, y_data, groups,
-           lr, wd, augment=False, epochs=30, batch=64, n_folds=5):
+def run_cv(model_class, dropout, X_data, y_data, groups, lr, wd, augment=False, epochs=30, batch=64, n_folds=5):
     sgkf = StratifiedGroupKFold(n_splits=n_folds, shuffle=True, random_state=SEED)
     all_probs, all_labels, fold_aucs = [], [], []
     for tr_idx, va_idx in sgkf.split(X_data, y_data, groups=groups):
@@ -230,13 +204,13 @@ def run_cv(model_class, dropout, X_data, y_data, groups,
         y_tr, y_va = y_data[tr_idx], y_data[va_idx]
         if augment:
             X_tr = np.stack([augment_waveform(w) for w in X_tr])
-        pw    = torch.tensor([(y_tr==0).sum() / max((y_tr==1).sum(), 1)]).to(DEVICE)
-        mdl   = model_class(dropout=dropout).to(DEVICE)
-        opt   = torch.optim.AdamW(mdl.parameters(), lr=lr, weight_decay=wd)
-        crit  = nn.BCEWithLogitsLoss(pos_weight=pw)
-        Xt    = torch.from_numpy(X_tr).unsqueeze(1).to(DEVICE)
-        yt    = torch.from_numpy(y_tr).to(DEVICE)
-        Xv    = torch.from_numpy(X_va).unsqueeze(1).to(DEVICE)
+        pw = torch.tensor([(y_tr==0).sum() / max((y_tr==1).sum(), 1)]).to(DEVICE)
+        mdl = model_class(dropout=dropout).to(DEVICE)
+        opt = torch.optim.AdamW(mdl.parameters(), lr=lr, weight_decay=wd)
+        crit = nn.BCEWithLogitsLoss(pos_weight=pw)
+        Xt = torch.from_numpy(X_tr).unsqueeze(1).to(DEVICE)
+        yt = torch.from_numpy(y_tr).to(DEVICE)
+        Xv = torch.from_numpy(X_va).unsqueeze(1).to(DEVICE)
         best_auc, best_probs = -1, None
         for _ in range(epochs):
             mdl.train()
@@ -258,16 +232,15 @@ def run_cv(model_class, dropout, X_data, y_data, groups,
     return np.array(fold_aucs), np.array(all_probs), np.array(all_labels)
 
 
-def train_full(model_class, dropout, X_tr, y_tr, lr, wd,
-               augment=False, epochs=30, batch=64, seed=42):
+def train_full(model_class, dropout, X_tr, y_tr, lr, wd, augment=False, epochs=30, batch=64, seed=42):
     torch.manual_seed(seed)
-    pw    = torch.tensor([(y_tr==0).sum() / max((y_tr==1).sum(), 1)]).to(DEVICE)
-    mdl   = model_class(dropout=dropout).to(DEVICE)
-    opt   = torch.optim.AdamW(mdl.parameters(), lr=lr, weight_decay=wd)
-    crit  = nn.BCEWithLogitsLoss(pos_weight=pw)
+    pw = torch.tensor([(y_tr==0).sum() / max((y_tr==1).sum(), 1)]).to(DEVICE)
+    mdl = model_class(dropout=dropout).to(DEVICE)
+    opt = torch.optim.AdamW(mdl.parameters(), lr=lr, weight_decay=wd)
+    crit = nn.BCEWithLogitsLoss(pos_weight=pw)
     X_use = np.stack([augment_waveform(w) for w in X_tr]) if augment else X_tr
-    Xt    = torch.from_numpy(X_use).unsqueeze(1).to(DEVICE)
-    yt    = torch.from_numpy(y_tr).to(DEVICE)
+    Xt = torch.from_numpy(X_use).unsqueeze(1).to(DEVICE)
+    yt = torch.from_numpy(y_tr).to(DEVICE)
     for _ in range(epochs):
         mdl.train()
         perm = torch.randperm(len(Xt), device=DEVICE)
@@ -292,10 +265,9 @@ def get_probs(mdl, X, batch=512):
 
 def eval_metrics(y_true, probs):
     preds = (probs >= 0.5).astype(int)
-    auc   = roc_auc_score(y_true, probs)
-    eer   = compute_eer(y_true, probs)
-    rpt   = classification_report(y_true, preds,
-                                  target_names=["real", "fake"], output_dict=True)
+    auc = roc_auc_score(y_true, probs)
+    eer = compute_eer(y_true, probs)
+    rpt = classification_report(y_true, preds, target_names=["real", "fake"], output_dict=True)
     return {"auc": auc, "eer": eer,
             "p_real": rpt["real"]["precision"],
             "r_real": rpt["real"]["recall"],
@@ -311,14 +283,11 @@ def save_results(results_dir, name, data):
     print(f"  Saved → {path}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Data setup (shared across experiments)
-# ─────────────────────────────────────────────────────────────────────────────
 def setup_data(args):
-    data_root    = Path(args.data_root)
-    wave_root    = data_root / "waveforms"
-    split_df     = pd.read_csv(data_root / "dataset_split.csv")
-    results_dir  = data_root / "results"
+    data_root = Path(args.data_root)
+    wave_root = data_root / "waveforms"
+    split_df = pd.read_csv(data_root / "dataset_split.csv")
+    results_dir = data_root / "results"
     results_dir.mkdir(exist_ok=True)
 
     train_real = split_df[(split_df["split"] == "train") & (split_df["class"] == "real")]
@@ -330,15 +299,15 @@ def setup_data(args):
     X_fake_t = np.stack([np.load(wave_root/"fake"/f"{r['video_id']}.npy").astype(np.float32)
                          for _, r in train_fake.iterrows()])
 
-    X_plain  = np.concatenate([X_real_t, X_fake_t])
-    y        = np.array([0.0]*len(X_real_t) + [1.0]*len(X_fake_t), dtype=np.float32)
-    groups   = np.concatenate([
+    X_plain = np.concatenate([X_real_t, X_fake_t])
+    y = np.array([0.0]*len(X_real_t) + [1.0]*len(X_fake_t), dtype=np.float32)
+    groups = np.concatenate([
         train_real["video_id"].str.extract(r"(id\d+)")[0].values,
         train_fake["video_id"].str.extract(r"(id\d+)")[0].values,
     ])
 
     X_zscore = np.stack([zscore(x) for x in X_plain])
-    T_plain  = build_toeplitz(X_plain)
+    T_plain = build_toeplitz(X_plain)
     T_zscore = build_toeplitz(X_zscore)
 
     print(f"Training: {int((y==0).sum())} real + {int((y==1).sum())} fake "
@@ -360,8 +329,8 @@ def run_technique_isolation(ctx, args):
     print("  EXPERIMENT A/B — Technique Isolation (z-score only, augment only)")
     print(f"{'='*70}")
     results = {"A_zscore_only": {}, "B_augment_only": {}}
-    total   = len(ARCH_CLASSES) * 2
-    done    = 0
+    total = len(ARCH_CLASSES) * 2
+    done = 0
 
     for label, use_zscore, augment in [
         ("A_zscore_only", True, False),
@@ -381,14 +350,14 @@ def run_technique_isolation(ctx, args):
             )
             done += 1
             preds = (probs >= 0.5).astype(int)
-            rpt   = classification_report(labels, preds,
+            rpt = classification_report(labels, preds,
                                           target_names=["real","fake"], output_dict=True)
             results[label][arch_name] = {
                 "mean_auc": float(fold_aucs.mean()),
-                "std_auc":  float(fold_aucs.std()),
-                "eer":      float(compute_eer(labels, probs)),
-                "p_real":   float(rpt["real"]["precision"]),
-                "f1_real":  float(rpt["real"]["f1-score"]),
+                "std_auc": float(fold_aucs.std()),
+                "eer": float(compute_eer(labels, probs)),
+                "p_real": float(rpt["real"]["precision"]),
+                "f1_real": float(rpt["real"]["f1-score"]),
             }
             print(f"    {arch_name:<16} AUC: {fold_aucs.mean():.4f}±{fold_aucs.std():.4f}  "
                   f"P-Real: {rpt['real']['precision']:.4f}  "
@@ -406,9 +375,9 @@ def run_hp_tuning(ctx, args):
     print(f"\n{'='*70}")
     print("  EXPERIMENT C — One-at-a-Time HP Tuning")
     print(f"{'='*70}")
-    results  = {}
-    total    = len(ARCH_CLASSES) * sum(len(v) for v in HP_SWEEP.values())
-    done     = 0
+    results = {}
+    total = len(ARCH_CLASSES) * sum(len(v) for v in HP_SWEEP.values())
+    done = 0
 
     for arch_name, (cls, _) in ARCH_CLASSES.items():
         base = BEST_CONFIGS[arch_name]
@@ -432,14 +401,14 @@ def run_hp_tuning(ctx, args):
                 )
                 done += 1
                 preds = (probs >= 0.5).astype(int)
-                rpt   = classification_report(labels_, preds,
+                rpt = classification_report(labels_, preds,
                                               target_names=["real","fake"], output_dict=True)
                 results[arch_name][hp_name][str(hp_val)] = {
                     "mean_auc": float(fold_aucs.mean()),
-                    "std_auc":  float(fold_aucs.std()),
-                    "eer":      float(compute_eer(labels_, probs)),
-                    "p_real":   float(rpt["real"]["precision"]),
-                    "f1_real":  float(rpt["real"]["f1-score"]),
+                    "std_auc": float(fold_aucs.std()),
+                    "eer": float(compute_eer(labels_, probs)),
+                    "p_real": float(rpt["real"]["precision"]),
+                    "f1_real": float(rpt["real"]["f1-score"]),
                 }
                 marker = " [BASE]" if is_base else ""
                 print(f"    {hp_name}={hp_val}{marker:<8}  "
@@ -460,17 +429,17 @@ def run_test_evaluation(ctx, args):
     print(f"{'='*70}")
 
     wave_root = ctx["wave_root"]
-    split_df  = ctx["split_df"]
-    test_df   = split_df[split_df["split"] == "test"]
+    split_df = ctx["split_df"]
+    test_df = split_df[split_df["split"] == "test"]
 
     print("Loading test waveforms...")
     X_test_plain = np.stack([
         np.load(wave_root / r["class"] / f"{r['video_id']}.npy").astype(np.float32)
         for _, r in test_df.iterrows()
     ])
-    y_test        = test_df["label"].values.astype(np.float32)
+    y_test = test_df["label"].values.astype(np.float32)
     X_test_zscore = np.stack([zscore(x) for x in X_test_plain])
-    T_test_plain  = build_toeplitz(X_test_plain)
+    T_test_plain = build_toeplitz(X_test_plain)
     T_test_zscore = build_toeplitz(X_test_zscore)
 
     print(f"Test set: {int((y_test==0).sum())} real + {int((y_test==1).sum())} fake")
@@ -482,8 +451,8 @@ def run_test_evaluation(ctx, args):
         return T_test_zscore if use_zscore else T_test_plain
 
     results = {"A_zscore_only": {}, "B_augment_only": {}, "C_hp_tuning": {}}
-    total   = len(ARCH_CLASSES) * 2 + len(ARCH_CLASSES) * sum(len(v) for v in HP_SWEEP.values())
-    done    = 0
+    total = len(ARCH_CLASSES) * 2 + len(ARCH_CLASSES) * sum(len(v) for v in HP_SWEEP.values())
+    done = 0
 
     for label, use_zscore, augment in [
         ("A_zscore_only", True, False),
@@ -491,15 +460,15 @@ def run_test_evaluation(ctx, args):
     ]:
         print(f"\n  TEST {label}:")
         for arch_name, (cls, _) in ARCH_CLASSES.items():
-            cfg  = BEST_CONFIGS[arch_name]
+            cfg = BEST_CONFIGS[arch_name]
             X_in = get_X(ctx["X_plain"], ctx["X_zscore"],
                          ctx["T_plain"], ctx["T_zscore"], arch_name, use_zscore)
-            Xte  = get_test_X(arch_name, use_zscore)
-            mdl  = train_full(cls, cfg["dropout"], X_in, ctx["y"],
+            Xte = get_test_X(arch_name, use_zscore)
+            mdl = train_full(cls, cfg["dropout"], X_in, ctx["y"],
                                lr=cfg["lr"], wd=cfg["wd"], augment=augment,
                                epochs=args.epochs, batch=args.batch)
             probs = get_probs(mdl, Xte)
-            m     = eval_metrics(y_test, probs)
+            m = eval_metrics(y_test, probs)
             results[label][arch_name] = m
             done += 1
             print(f"    {arch_name:<16} AUC: {m['auc']:.4f}  EER: {m['eer']*100:.1f}%  "
@@ -521,7 +490,7 @@ def run_test_evaluation(ctx, args):
                                   lr=cfg["lr"], wd=cfg["wd"], augment=False,
                                   epochs=args.epochs, batch=args.batch)
                 probs = get_probs(mdl, Xte)
-                m     = eval_metrics(y_test, probs)
+                m = eval_metrics(y_test, probs)
                 results["C_hp_tuning"][arch_name][hp_name][str(hp_val)] = m
                 done += 1
                 is_base = (hp_val == base[hp_name])
@@ -542,17 +511,17 @@ def run_diagnostics(ctx, args):
     print(f"{'='*70}")
 
     wave_root = ctx["wave_root"]
-    split_df  = ctx["split_df"]
-    test_df   = split_df[split_df["split"] == "test"].copy()
+    split_df = ctx["split_df"]
+    test_df = split_df[split_df["split"] == "test"].copy()
     test_df["identity"] = test_df["video_id"].str.extract(r"(id\d+)")[0]
 
     X_test = np.stack([
         np.load(wave_root / r["class"] / f"{r['video_id']}.npy").astype(np.float32)
         for _, r in test_df.iterrows()
     ])
-    y_test     = test_df["label"].values.astype(np.float32)
+    y_test = test_df["label"].values.astype(np.float32)
     identities = test_df["identity"].values
-    test_ids   = sorted(test_df["identity"].unique())
+    test_ids = sorted(test_df["identity"].unique())
 
     print(f"Test: {int((y_test==0).sum())} real + {int((y_test==1).sum())} fake "
           f"| {len(test_ids)} identities")
@@ -587,23 +556,23 @@ def run_diagnostics(ctx, args):
 
     # Rebalance check
     np.random.seed(42)
-    real_idx    = np.where(y_test == 0)[0]
+    real_idx = np.where(y_test == 0)[0]
     fake_sample = np.random.choice(np.where(y_test == 1)[0],
                                    size=len(real_idx), replace=False)
-    bal_idx  = np.concatenate([real_idx, fake_sample])
-    auc_bal  = roc_auc_score(y_test[bal_idx], probs_full[bal_idx])
+    bal_idx = np.concatenate([real_idx, fake_sample])
+    auc_bal = roc_auc_score(y_test[bal_idx], probs_full[bal_idx])
     auc_full = roc_auc_score(y_test, probs_full)
-    delta    = auc_bal - auc_full
+    delta = auc_bal - auc_full
     print(f"\n  Rebalance delta: {delta:+.4f}  (>+0.02 = imbalance is a factor)")
 
     # Multi-seed
     print("\n  Multi-seed stability (1D ResNet, dropout=0.3, 5 seeds):")
     seed_aucs = []
     for seed in [42, 7, 123, 999, 2024]:
-        m_s   = train_full(Waveform1DResNet, 0.3, ctx["X_plain"], ctx["y"],
+        m_s = train_full(Waveform1DResNet, 0.3, ctx["X_plain"], ctx["y"],
                             lr=1e-3, wd=5e-4, epochs=args.epochs,
                             batch=args.batch, seed=seed)
-        p_s   = get_probs(m_s, X_test)
+        p_s = get_probs(m_s, X_test)
         auc_s = roc_auc_score(y_test, p_s)
         eer_s = compute_eer(y_test, p_s)
         seed_aucs.append(auc_s)
@@ -633,8 +602,8 @@ def run_eval18(ctx, args):
     print(f"{'='*70}")
 
     wave_root = ctx["wave_root"]
-    split_df  = ctx["split_df"]
-    eval_df   = split_df[split_df["split"].isin(["val", "test"])].copy()
+    split_df = ctx["split_df"]
+    eval_df = split_df[split_df["split"].isin(["val", "test"])].copy()
     eval_df["identity"] = eval_df["video_id"].str.extract(r"(id\d+)")[0]
 
     print("Loading val + test waveforms...")
@@ -642,9 +611,9 @@ def run_eval18(ctx, args):
         np.load(wave_root / r["class"] / f"{r['video_id']}.npy").astype(np.float32)
         for _, r in eval_df.iterrows()
     ])
-    y_eval       = eval_df["label"].values.astype(np.float32)
+    y_eval = eval_df["label"].values.astype(np.float32)
     eval_ids_arr = eval_df["identity"].values
-    eval_ids     = sorted(eval_df["identity"].unique())
+    eval_ids = sorted(eval_df["identity"].unique())
     print(f"Combined: {int((y_eval==0).sum())} real + {int((y_eval==1).sum())} fake "
           f"| {len(eval_ids)} identities")
 
@@ -652,17 +621,17 @@ def run_eval18(ctx, args):
     print("\n  1D ResNet dropout=0.3, 5 seeds:")
     seed_results = []
     for seed in [42, 7, 123, 999, 2024]:
-        mdl   = train_full(Waveform1DResNet, 0.3, ctx["X_plain"], ctx["y"],
+        mdl = train_full(Waveform1DResNet, 0.3, ctx["X_plain"], ctx["y"],
                             lr=1e-3, wd=5e-4, epochs=args.epochs,
                             batch=args.batch, seed=seed)
         probs = get_probs(mdl, X_eval)
-        auc   = roc_auc_score(y_eval, probs)
-        eer   = compute_eer(y_eval, probs)
+        auc = roc_auc_score(y_eval, probs)
+        eer = compute_eer(y_eval, probs)
         seed_results.append({"seed": seed, "auc": float(auc), "eer": float(eer), "probs": probs})
         print(f"  seed={seed:<6}  AUC: {auc:.4f}  EER: {eer*100:.1f}%")
 
     mean18 = float(np.mean([r["auc"] for r in seed_results]))
-    std18  = float(np.std([r["auc"] for r in seed_results]))
+    std18 = float(np.std([r["auc"] for r in seed_results]))
     print(f"\n  Mean ± std:  {mean18:.4f} ± {std18:.4f}")
     print(f"  → Paper-reported AUC: {mean18:.4f} ± {std18:.4f}")
 
@@ -671,9 +640,9 @@ def run_eval18(ctx, args):
     print("\n  Per-identity AUC (seed=42):")
     per_id18 = {}
     for identity in eval_ids:
-        mask   = eval_ids_arr == identity
-        y_id   = y_eval[mask]; p_id = best_probs[mask]
-        split  = eval_df[eval_df["identity"] == identity]["split"].iloc[0]
+        mask = eval_ids_arr == identity
+        y_id = y_eval[mask]; p_id = best_probs[mask]
+        split = eval_df[eval_df["identity"] == identity]["split"].iloc[0]
         if (y_id==0).sum() == 0 or (y_id==1).sum() == 0:
             continue
         auc = roc_auc_score(y_id, p_id)
@@ -705,12 +674,12 @@ def run_permethod(ctx, args):
     print("  PER-METHOD EVALUATION — 7 TF generation methods")
     print(f"{'='*70}")
 
-    METHODS      = ["AniTalker", "EchoMimic", "EDTalk", "FLOAT",
+    METHODS = ["AniTalker", "EchoMimic", "EDTalk", "FLOAT",
                     "IP_LAP", "Real3DPortrait", "SadTalker"]
     METHOD_SIZES = [357, 357, 357, 357, 357, 357, 358]
 
     wave_root = ctx["wave_root"]
-    split_df  = ctx["split_df"]
+    split_df = ctx["split_df"]
 
     # All real waveforms
     all_real = split_df[split_df["class"] == "real"].drop_duplicates("video_id")
@@ -756,12 +725,12 @@ def run_permethod(ctx, args):
 
     method_results = {}
     for method in METHODS:
-        mask      = all_fakes["method"] == method
-        p_method  = probs_fake[mask.values]
-        n_fake    = mask.sum()
-        y_comb    = np.concatenate([y_real, np.ones(n_fake, dtype=np.float32)])
-        p_comb    = np.concatenate([probs_real, p_method])
-        m         = eval_metrics(y_comb, p_comb)
+        mask = all_fakes["method"] == method
+        p_method = probs_fake[mask.values]
+        n_fake = mask.sum()
+        y_comb = np.concatenate([y_real, np.ones(n_fake, dtype=np.float32)])
+        p_comb = np.concatenate([probs_real, p_method])
+        m = eval_metrics(y_comb, p_comb)
         method_results[method] = {**m, "n_fake": int(n_fake)}
         print(f"  {method:<22} {n_fake:>7} {m['auc']:>8.4f} {m['eer']*100:>6.1f}% "
               f"{m['p_real']:>8.4f} {m['r_real']:>8.4f}")
