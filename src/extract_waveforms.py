@@ -25,6 +25,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
 import numpy as np
 import torch
+import mediapipe as mp
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
 
 def parse_args():
     p = argparse.ArgumentParser(description="Batch rPPG waveform extraction")
@@ -34,16 +37,12 @@ def parse_args():
     p.add_argument("--size", type=int, default=128)
     p.add_argument("--expand-coef", type=float, default=1.5)
     p.add_argument("--min-frames", type=int, default=60)
-    p.add_argument("--stride", type=int, default=60,
-                   help="Stride for sliding-window extraction on real videos (0 = disable)")
-    p.add_argument("--flush-every",  type=int, default=100,
-                   help="Write manifest to disk every N videos")
-    p.add_argument("--workers",      type=int, default=1,
-                   help="Parallel video readers (keep at 1 if GPU is the bottleneck)")
+    p.add_argument("--stride", type=int, default=60, help="Stride for sliding-window extraction on real videos (0 = disable)")
+    p.add_argument("--flush-every", type=int, default=100, help="Write manifest to disk every N videos")
+    p.add_argument("--workers", type=int, default=1, help="Parallel video readers (keep at 1 if GPU is the bottleneck)")
     return p.parse_args()
 
 
-# ── RhythmFormer loader ───────────────────────────────────────────────────────
 def load_rhythmformer(repo_dir, device):
     repo = Path(repo_dir)
     weights = repo / "PreTrainedModels" / "UBFC_cross_RhythmFormer.pth"
@@ -75,11 +74,7 @@ def load_rhythmformer(repo_dir, device):
     return model
 
 
-# ── MediaPipe face detector ───────────────────────────────────────────────────
 def build_face_detector(model_path):
-    import mediapipe as mp
-    from mediapipe.tasks import python as mp_python
-    from mediapipe.tasks.python import vision as mp_vision
 
     if not Path(model_path).exists():
         url = ("https://storage.googleapis.com/mediapipe-models/face_detector/"
@@ -96,12 +91,8 @@ def build_face_detector(model_path):
     return detector
 
 
-# ── Video → tensor ────────────────────────────────────────────────────────────
-def video_to_tensor(path, face_detector, n_frames=160, size=128,
-                    expand_coef=1.5, min_native_frames=60, start_frame=0):
+def video_to_tensor(path, face_detector, n_frames=160, size=128, expand_coef=1.5, min_native_frames=60, start_frame=0):
     """Read video, detect face, crop and normalize. Returns (tensor, fps)."""
-    import mediapipe as mp
-
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise IOError(f"Could not open {path}")
@@ -168,13 +159,12 @@ def video_to_tensor(path, face_detector, n_frames=160, size=128,
     return tensor, fps
 
 
-# ── Main extraction loop ──────────────────────────────────────────────────────
 def main():
     args = parse_args()
     data_root = Path(args.data_root)
-    device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Data root: {data_root}")
-    print(f"Device:    {device}")
+    print(f"Device: {device}")
 
     # Paths
     video_root = data_root / "videos"
@@ -194,7 +184,7 @@ def main():
     for label in ("real", "fake"):
         vdir = video_root / label
         if not vdir.exists():
-            print(f"WARNING: {vdir} does not exist — skipping")
+            print(f"WARNING: {vdir} does not exist (skipping)")
             continue
         for vp in sorted(vdir.rglob("*")):
             if not (vp.is_file() and vp.suffix.lower() in VIDEO_EXTS):
@@ -298,10 +288,10 @@ def main():
 
     elapsed = time.time() - t0
     print(f"\n=== Extraction complete ===")
-    print(f"  OK:     {n_ok}")
-    print(f"  Failed: {n_fail}")
-    print(f"  Time:   {elapsed/60:.1f} min")
-    print(f"  Manifest: {manifest_path}")
+    print(f"OK: {n_ok}")
+    print(f"Failed: {n_fail}")
+    print(f"Time: {elapsed/60:.1f} min")
+    print(f"Manifest: {manifest_path}")
     print(f"\nNext step: python3 build_split.py --data-root {args.data_root}")
 
 
