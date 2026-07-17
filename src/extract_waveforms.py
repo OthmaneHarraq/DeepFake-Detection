@@ -2,9 +2,9 @@
 """
 extract_waveforms.py — Batch rPPG waveform extraction using RhythmFormer.
 
-Walks videos/real/ and videos/fake/ (handles flat or per-method subdirectory
-layouts), extracts a 160-sample rPPG waveform per video, and saves each as a
-.npy file under waveforms/real/ or waveforms/fake/.
+Walks videos/real/ and videos/fake/, extracts a 160-sample rPPG waveform 
+per video, and saves each as a .npy file under waveforms/real/ or 
+waveforms/fake/.
 
 Fully resumable: already-extracted videos are skipped.
 Writes a manifest.csv tracking status of every video.
@@ -26,16 +26,15 @@ import cv2
 import numpy as np
 import torch
 
-# ── Args ──────────────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Batch rPPG waveform extraction")
-    p.add_argument("--data-root",    default=str(Path.home() / "data"))
-    p.add_argument("--repo-dir",     default=str(Path.home() / "RhythmFormer"))
-    p.add_argument("--n-frames",     type=int, default=160)
-    p.add_argument("--size",         type=int, default=128)
-    p.add_argument("--expand-coef",  type=float, default=1.5)
-    p.add_argument("--min-frames",   type=int, default=60)
-    p.add_argument("--stride",        type=int, default=60,
+    p.add_argument("--data-root", default=str(Path.home() / "data"))
+    p.add_argument("--repo-dir", default=str(Path.home() / "RhythmFormer"))
+    p.add_argument("--n-frames", type=int, default=160)
+    p.add_argument("--size", type=int, default=128)
+    p.add_argument("--expand-coef", type=float, default=1.5)
+    p.add_argument("--min-frames", type=int, default=60)
+    p.add_argument("--stride", type=int, default=60,
                    help="Stride for sliding-window extraction on real videos (0 = disable)")
     p.add_argument("--flush-every",  type=int, default=100,
                    help="Write manifest to disk every N videos")
